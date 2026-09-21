@@ -176,7 +176,7 @@ fun SettingsAndAboutScreen() {
             val regex = """(?:ipd[=:]\s*|ipd\s*)?([5-7][0-9](?:\.[0-9]+)?)""".toRegex(RegexOption.IGNORE_CASE)
             val match = regex.find(text)
             if (match != null) {
-                val parsed = match.groupValues.toFloatOrNull()
+                val parsed = match.groupValues.get(1).toFloatOrNull()
                 if (parsed != null && parsed in 50f..80f) {
                     ipd = parsed
                     VrSettings.setIpdMm(context, parsed)

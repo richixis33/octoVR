@@ -129,11 +129,12 @@ class VrActivity : ComponentActivity(), SensorEventListener {
             val points = landmarkList.map { floatArrayOf(it.x(), it.y(), it.z()) }
             hands.add(points)
 
-            // Проверка щипка: кончик большого (4) и кончик указательного (8)
             if (points.size >= 9) {
-                val dx = points[4][0] - points[8][0]
-                val dy = points[4] - points[8]
-                val dz = points[4][2] - points[8][2]
+                val p4 = points.get(4)
+                val p8 = points.get(8)
+                val dx = p4.get(0) - p8.get(0)
+                val dy = p4.get(1) - p8.get(1)
+                val dz = p4.get(2) - p8.get(2)
                 val dist = sqrt(dx * dx + dy * dy + dz * dz)
                 if (dist < 0.05f) {
                     runOnUiThread { recenterPanelInFrontOfUser() }
@@ -144,9 +145,9 @@ class VrActivity : ComponentActivity(), SensorEventListener {
     }
 
     private fun recenterPanelInFrontOfUser() {
-        panelWorldX = -remappedMatrix[2] * 1.5f
-        panelWorldY = -remappedMatrix[6] * 1.5f
-        panelWorldZ = -remappedMatrix[10] * 1.5f
+        panelWorldX = -remappedMatrix.get(2) * 1.5f
+        panelWorldY = -remappedMatrix.get(6) * 1.5f
+        panelWorldZ = -remappedMatrix.get(10) * 1.5f
     }
 
     override fun onResume() {
@@ -247,9 +248,9 @@ fun EyeViewport(
         val py = panelPos.second
         val pz = panelPos.third
 
-        val viewX = rotationMatrix[0] * px + rotationMatrix[4] * py + rotationMatrix[8] * pz
-        val viewY = rotationMatrix * px + rotationMatrix[5] * py + rotationMatrix[9] * pz
-        val viewZ = rotationMatrix[2] * px + rotationMatrix[6] * py + rotationMatrix[10] * pz
+        val viewX = rotationMatrix.get(0) * px + rotationMatrix.get(4) * py + rotationMatrix.get(8) * pz
+        val viewY = rotationMatrix.get(1) * px + rotationMatrix.get(5) * py + rotationMatrix.get(9) * pz
+        val viewZ = rotationMatrix.get(2) * px + rotationMatrix.get(6) * py + rotationMatrix.get(10) * pz
 
         if (viewZ > 0.3f) {
             val fov = 650f
@@ -281,12 +282,12 @@ fun EyeViewport(
         hands.forEach { points ->
             handConnections.forEach { (a, b) ->
                 if (a < points.size && b < points.size) {
-                    val p1 = points[a]
-                    val p2 = points[b]
+                    val p1 = points.get(a)
+                    val p2 = points.get(b)
                     drawLine(
                         color = Color(0xFF64B5F6),
-                        start = Offset(p1[0] * size.width, p1 * size.height),
-                        end = Offset(p2[0] * size.width, p2 * size.height),
+                        start = Offset(p1.get(0) * size.width, p1.get(1) * size.height),
+                        end = Offset(p2.get(0) * size.width, p2.get(1) * size.height),
                         strokeWidth = 5f
                     )
                 }
@@ -296,7 +297,7 @@ fun EyeViewport(
                 drawCircle(
                     color = if (idx in listOf(4, 8)) Color(0xFFFF5252) else Color.White,
                     radius = if (idx in listOf(4, 8)) 9f else 6f,
-                    center = Offset(pt[0] * size.width, pt * size.height)
+                    center = Offset(pt.get(0) * size.width, pt.get(1) * size.height)
                 )
             }
         }
