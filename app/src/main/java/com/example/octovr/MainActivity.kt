@@ -1,23 +1,30 @@
 package com.example.octovr
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.example.octovr.ui.theme.OctoVRTheme
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,14 +40,27 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainAppScaffold() {
+    val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
+
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasCameraPermission = granted
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        text = if (selectedTab == 0) "OctoVR" else "О приложении",
+                        text = if (selectedTab == 0) "OctoVR" else "Настройки и О приложении",
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -51,14 +71,14 @@ fun MainAppScaffold() {
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    icon = { Icon(Icons.Default.Home, contentDescription = "Меню") },
+                    icon = { Icon(Icons.Default.Home, contentDescription = "Главная") },
                     label = { Text("Главная") }
                 )
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    icon = { Icon(Icons.Default.Info, contentDescription = "О приложении") },
-                    label = { Text("О приложении") }
+                    icon = { Icon(Icons.Default.Settings, contentDescription = "Настройки") },
+                    label = { Text("Настройки") }
                 )
             }
         }
@@ -69,56 +89,109 @@ fun MainAppScaffold() {
                 .padding(padding)
         ) {
             when (selectedTab) {
-                0 -> MenuScreen()
-                1 -> AboutScreen()
+                0 -> HomeScreen(
+                    hasCameraPermission = hasCameraPermission,
+                    onRequestPermission = { permissionLauncher.launch(Manifest.permission.CAMERA) },
+                    onEnterVr = {
+                        if (!hasCameraPermission) {
+                            permissionLauncher.launch(Manifest.permission.CAMERA)
+                        } else {
+                            context.startActivity(Intent(context, VrActivity::class.java))
+                        }
+                    }
+                )
+                1 -> SettingsAndAboutScreen()
             }
         }
     }
 }
 
 @Composable
-fun MenuScreen() {
-    Box(
+fun HomeScreen(
+    hasCameraPermission: Boolean,
+    onRequestPermission: () -> Unit,
+    onEnterVr: () -> Unit
+) {
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
-        contentAlignment = Alignment.Center
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        ElevatedCard(
-            modifier = Modifier.fillMaxWidth()
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text("OctoVR Experience", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "3DoF трекинг головы, Side-by-Side (SBS) стерео-режим и распознавание рук MediaPipe с жестом щипка.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
+
+        // Большая кнопка Войти в VR
+        Button(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp),
+            onClick = onEnterVr
         ) {
-            Column(
-                modifier = Modifier
-                    .padding(24.dp)
-                    .fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Icon(
-                    imageVector = Icons.Default.SmartToy,
-                    contentDescription = null,
-                    modifier = Modifier.size(64.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Добро пожаловать в OctoVR",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Здесь будет главное меню и основные функции приложения.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.width(12.dp))
+            Text("Войти в VR", style = MaterialTheme.typography.titleMedium)
+        }
+
+        if (!hasCameraPermission) {
+            OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Требуется доступ к камере", style = MaterialTheme.typography.titleSmall)
+                        Text("Для отслеживания рук и сканирования QR", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Button(onClick = onRequestPermission) {
+                        Text("Разрешить")
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-fun AboutScreen() {
+fun SettingsAndAboutScreen() {
+    val context = LocalContext.current
     val scrollState = rememberScrollState()
+
+    var ipd by remember { mutableFloatStateOf(VrSettings.getIpdMm(context)) }
+    var confidence by remember { mutableFloatStateOf(VrSettings.getConfidence(context)) }
+    var smoothing by remember { mutableStateOf(VrSettings.isSmoothing(context)) }
+
+    // Лаунчер для сканирования QR-кода
+    val qrLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        if (result.contents != null) {
+            val text = result.contents
+            // Поиск чисел IPD (например ipd:64 или http...ipd=64)
+            val regex = """(?:ipd[=:]\s*|ipd\s*)?([5-7][0-9](?:\.[0-9]+)?)""".toRegex(RegexOption.IGNORE_CASE)
+            val match = regex.find(text)
+            if (match != null) {
+                val parsed = match.groupValues.toFloatOrNull()
+                if (parsed != null && parsed in 50f..80f) {
+                    ipd = parsed
+                    VrSettings.setIpdMm(context, parsed)
+                    Toast.makeText(context, "IPD установлен: ${parsed} мм", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "Распознан QR: $text", Toast.LENGTH_LONG).show()
+                }
+            } else {
+                Toast.makeText(context, "Данные QR: $text", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -127,39 +200,79 @@ fun AboutScreen() {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Настройка IPD и QR
         ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Text(
-                    text = "OctoVR Mobile",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Калибровка IPD (Межзрачковое расстояние)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("Подстройте расстояние между линзами ваших VR-очков: ${"%.1f".format(ipd)} мм", style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(8.dp))
+
+                Slider(
+                    value = ipd,
+                    onValueChange = {
+                        ipd = it
+                        VrSettings.setIpdMm(context, it)
+                    },
+                    valueRange = 55f..75f
                 )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Версия 1.0.0",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.secondary
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "Приложение создано на базе Jetpack Compose с поддержкой Material You (Material 3 Dynamic Color).",
-                    style = MaterialTheme.typography.bodyMedium
-                )
+
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        val options = ScanOptions().apply {
+                            setPrompt("Наведите камеру на QR-код профиля гарнитуры")
+                            setBeepEnabled(true)
+                            setOrientationLocked(false)
+                        }
+                        qrLauncher.launch(options)
+                    }
+                ) {
+                    Icon(Icons.Default.QrCodeScanner, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Сканировать QR-код гарнитуры")
+                }
             }
         }
 
+        // Параметры MediaPipe
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Настройки MediaPipe", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+
+                Text("Порог уверенности детекции: ${"%.2f".format(confidence)}")
+                Slider(
+                    value = confidence,
+                    onValueChange = {
+                        confidence = it
+                        VrSettings.setConfidence(context, it)
+                    },
+                    valueRange = 0.3f..0.9f
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Сглаживание движений рук")
+                    Switch(
+                        checked = smoothing,
+                        onCheckedChange = {
+                            smoothing = it
+                            VrSettings.setSmoothing(context, it)
+                        }
+                    )
+                }
+            }
+        }
+
+        // О приложении
         OutlinedCard(modifier = Modifier.fillMaxWidth()) {
             Column {
                 ListItem(
-                    headlineContent = { Text("Разработчик") },
-                    supportingContent = { Text("richixis33") },
-                    leadingContent = { Icon(Icons.Default.Person, contentDescription = null) }
-                )
-                HorizontalDivider()
-                ListItem(
-                    headlineContent = { Text("Дизайн") },
-                    supportingContent = { Text("Material Design 3 (Material You)") },
+                    headlineContent = { Text("OctoVR") },
+                    supportingContent = { Text("Версия 1.1.0 • Material You + MediaPipe SBS") },
                     leadingContent = { Icon(Icons.Default.Info, contentDescription = null) }
                 )
             }

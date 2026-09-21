@@ -49,6 +49,18 @@ android {
 }
 
 dependencies {
+    // MediaPipe Hand Tracking
+    implementation("com.google.mediapipe:tasks-vision:0.10.14")
+
+    // CameraX
+    implementation("androidx.camera:camera-core:1.3.4")
+    implementation("androidx.camera:camera-camera2:1.3.4")
+    implementation("androidx.camera:camera-lifecycle:1.3.4")
+    implementation("androidx.camera:camera-view:1.3.4")
+
+    // QR Code scanner (ZXing)
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+
     implementation(platform("androidx.compose:compose-bom:2024.06.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
