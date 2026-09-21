@@ -15,8 +15,8 @@ object VrSettings {
     private fun p(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun getIpdMm(context: Context): Float = p(context).getFloat(KEY_IPD_MM, 63.0f)
-    fun setIpdMm(context: Context, value: Float) = p(context).edit().putFloat(KEY_IPD_MM, value).apply()
+    fun getIpdMm(context: Context): Float = p(context).getFloat(KEY_IPD_MM, 63.0f).coerceIn(50f, 100f)
+    fun setIpdMm(context: Context, value: Float) = p(context).edit().putFloat(KEY_IPD_MM, value.coerceIn(50f, 100f)).apply()
 
     fun getConfidence(context: Context): Float = p(context).getFloat(KEY_CONFIDENCE, 0.6f)
     fun setConfidence(context: Context, value: Float) = p(context).edit().putFloat(KEY_CONFIDENCE, value).apply()

@@ -177,7 +177,7 @@ fun SettingsAndAboutScreen() {
             val match = regex.find(text)
             if (match != null) {
                 val parsed = match.groupValues.get(1).toFloatOrNull()
-                if (parsed != null && parsed in 50f..80f) {
+                if (parsed != null && parsed in 50f..100f) {
                     ipd = parsed
                     VrSettings.setIpdMm(context, parsed)
                     Toast.makeText(context, "IPD установлен: ${parsed} мм", Toast.LENGTH_SHORT).show()
@@ -209,7 +209,7 @@ fun SettingsAndAboutScreen() {
                         ipd = it
                         VrSettings.setIpdMm(context, it)
                     },
-                    valueRange = 55f..75f
+                    valueRange = 50f..100f
                 )
 
                 Button(

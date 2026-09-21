@@ -14,6 +14,8 @@ import android.hardware.SensorManager
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.util.Size
 import android.view.KeyEvent
 import android.view.WindowManager
@@ -66,23 +68,21 @@ class VrActivity : ComponentActivity(), SensorEventListener {
     private lateinit var sensorManager: SensorManager
     private var rotationSensor: Sensor? = null
 
+    // Матрица вращения головы (4x4)
     private val rotationMatrix = FloatArray(16) { if (it % 5 == 0) 1f else 0f }
-    private val remappedMatrix = FloatArray(16)
-    private val orientationAngles = FloatArray(3)
 
-    // Текущие углы поворота головы
-    private var headYaw by mutableFloatStateOf(0f)
-    private var headPitch by mutableFloatStateOf(0f)
-
-    private var initialYaw = 0f
-    private var initialPitch = 0f
+    // Мировое положение плашки в 3D (X, Y, Z)
+    private var panelWorldX by mutableFloatStateOf(0f)
+    private var panelWorldY by mutableFloatStateOf(0f)
+    private var panelWorldZ by mutableFloatStateOf(1.5f)
     private var isCalibrated = false
 
-    // Мировое положение плашки в градусах
-    private var panelYaw by mutableFloatStateOf(0f)
-    private var panelPitch by mutableFloatStateOf(0f)
+    // Счётчик нажатий кнопки на плашке
+    private var buttonClickCount by mutableIntStateOf(0)
+    private var isButtonHovered by mutableStateOf(false)
+    private var wasPinching = false
 
-    // Текущий IPD (мм)
+    // Текущий IPD (до 100 мм)
     private var currentIpd by mutableFloatStateOf(63.0f)
     private var showIpdCrosshairUntil by mutableLongStateOf(0L)
 
@@ -91,6 +91,7 @@ class VrActivity : ComponentActivity(), SensorEventListener {
 
     private var landmarker: HandLandmarker? = null
     private val cameraExecutor = Executors.newSingleThreadExecutor()
+    private var vibrator: Vibrator? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -98,6 +99,7 @@ class VrActivity : ComponentActivity(), SensorEventListener {
         hideSystemBars()
 
         currentIpd = VrSettings.getIpdMm(this)
+        vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
@@ -120,14 +122,14 @@ class VrActivity : ComponentActivity(), SensorEventListener {
                     showCrosshair = SystemClock.uptimeMillis() < showIpdCrosshairUntil,
                     passthroughAlpha = VrSettings.getPassthroughAlpha(this@VrActivity),
                     cameraFrame = latestCameraFrame,
-                    headYaw = headYaw,
-                    headPitch = headPitch,
-                    panelYaw = panelYaw,
-                    panelPitch = panelPitch,
-                    hands = handLandmarks
+                    rotationMatrix = rotationMatrix,
+                    panelPos = Triple(panelWorldX, panelWorldY, panelWorldZ),
+                    hands = handLandmarks,
+                    clickCount = buttonClickCount,
+                    isButtonHovered = isButtonHovered
                 )
 
-                // Оверлей управления прямо в VR
+                // Оверлей в VR
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -142,7 +144,6 @@ class VrActivity : ComponentActivity(), SensorEventListener {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Назад", tint = Color.White)
                     }
 
-                    // Панель IPD и центровки
                     Row(
                         modifier = Modifier
                             .background(Color(0xCC1A1A20), RoundedCornerShape(20.dp))
@@ -158,7 +159,7 @@ class VrActivity : ComponentActivity(), SensorEventListener {
                         }
 
                         Text(
-                            text = "IPD: ${"%.1f".format(currentIpd)} мм (Громкость +/-)",
+                            text = "IPD: ${"%.1f".format(currentIpd)} мм (до 100)",
                             color = Color(0xFF64B5F6),
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
@@ -184,13 +185,12 @@ class VrActivity : ComponentActivity(), SensorEventListener {
     }
 
     private fun changeIpd(delta: Float) {
-        val updated = (currentIpd + delta).coerceIn(52f, 78f)
+        val updated = (currentIpd + delta).coerceIn(50f, 100f)
         currentIpd = updated
         VrSettings.setIpdMm(this, updated)
         showIpdCrosshairUntil = SystemClock.uptimeMillis() + 2500L
     }
 
-    // Перехват кнопок громкости телефона
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
@@ -288,32 +288,101 @@ class VrActivity : ComponentActivity(), SensorEventListener {
         imageProxy.close()
     }
 
+    // Векторная математика осей телефона в ландшафтном режиме
+    // Исключает gimbal lock и уход плашки вправо при наклоне вверх
+    private fun getCameraAxes(): Triple<FloatArray, FloatArray, FloatArray> {
+        // Forward: из задней камеры телефона (-Z в локальных координатах)
+        val f = floatArrayOf(-rotationMatrix.get(2), -rotationMatrix.get(6), -rotationMatrix.get(10))
+        // Up: вверх в альбомной ориентации (+X в локальных координатах)
+        val u = floatArrayOf(rotationMatrix.get(0), rotationMatrix.get(4), rotationMatrix.get(8))
+        // Right: вправо в альбомной ориентации (-Y в локальных координатах)
+        val r = floatArrayOf(-rotationMatrix.get(1), -rotationMatrix.get(5), -rotationMatrix.get(9))
+        return Triple(f, u, r)
+    }
+
+    private fun recenterPanel() {
+        val (f, _, _) = getCameraAxes()
+        panelWorldX = f.get(0) * 1.5f
+        panelWorldY = f.get(1) * 1.5f
+        panelWorldZ = f.get(2) * 1.5f
+    }
+
     private fun processHands(result: HandLandmarkerResult) {
         val hands = mutableListOf<List<FloatArray>>()
+        var pinchDetected = false
+        var cursorOnButton = false
+
+        val (f, u, r) = getCameraAxes()
+
         result.landmarks().forEach { landmarkList ->
             val points = landmarkList.map { floatArrayOf(it.x(), it.y(), it.z()) }
             hands.add(points)
 
-            // Щипок пальцев (большой 4 и указательный 8)
             if (points.size >= 9) {
-                val p4 = points.get(4)
-                val p8 = points.get(8)
+                val p4 = points.get(4) // кончик большого пальца
+                val p8 = points.get(8) // кончик указательного пальца (кружок-курсор)
+
                 val dx = p4.get(0) - p8.get(0)
                 val dy = p4.get(1) - p8.get(1)
                 val dz = p4.get(2) - p8.get(2)
                 val dist = sqrt(dx * dx + dy * dy + dz * dz)
-                if (dist < 0.05f) {
-                    runOnUiThread { recenterPanel() }
+
+                if (dist < 0.055f) {
+                    pinchDetected = true
+                }
+
+                // Проверяем, наведен ли кружок указательного пальца на кнопку
+                // Курсор нормализован от 0 до 1
+                val cursorNormX = p8.get(0)
+                val cursorNormY = p8.get(1)
+
+                // Проекция положения плашки в камеру
+                val relX = panelWorldX * r.get(0) + panelWorldY * r.get(1) + panelWorldZ * r.get(2)
+                val relY = panelWorldX * u.get(0) + panelWorldY * u.get(1) + panelWorldZ * u.get(2)
+                val relZ = panelWorldX * f.get(0) + panelWorldY * f.get(1) + panelWorldZ * f.get(2)
+
+                if (relZ > 0.3f) {
+                    // Нормализованные координаты плашки в поле зрения
+                    val panelNormX = 0.5f + (relX / relZ) * 0.6f
+                    val panelNormY = 0.5f - (relY / relZ) * 0.6f
+
+                    // Проверяем зону кнопки (нижняя половина плашки)
+                    if (abs(cursorNormX - panelNormX) < 0.12f && abs(cursorNormY - (panelNormY + 0.04f)) < 0.07f) {
+                        cursorOnButton = true
+                    }
                 }
             }
         }
+
         handLandmarks = hands
+        isButtonHovered = cursorOnButton
+
+        // Обработка клика щелчком
+        if (pinchDetected && !wasPinching) {
+            wasPinching = true
+            runOnUiThread {
+                if (isButtonHovered) {
+                    // Клик по кнопке на плашке
+                    buttonClickCount++
+                    triggerVibration()
+                } else {
+                    // Щелчок в пустоте центрирует плашку перед собой
+                    recenterPanel()
+                }
+            }
+        } else if (!pinchDetected) {
+            wasPinching = false
+        }
     }
 
-    // Центрирует плашку прямо перед глазами пользователя
-    private fun recenterPanel() {
-        panelYaw = headYaw
-        panelPitch = headPitch
+    private fun triggerVibration() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator?.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                vibrator?.vibrate(40)
+            }
+        } catch (_: Exception) {}
     }
 
     override fun onResume() {
@@ -337,29 +406,10 @@ class VrActivity : ComponentActivity(), SensorEventListener {
         if (event?.sensor?.type == Sensor.TYPE_ROTATION_VECTOR) {
             SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
 
-            // Альбомная переориентация осей
-            SensorManager.remapCoordinateSystem(
-                rotationMatrix,
-                SensorManager.AXIS_Y,
-                SensorManager.AXIS_MINUS_X,
-                remappedMatrix
-            )
-
-            SensorManager.getOrientation(remappedMatrix, orientationAngles)
-
-            val rawYaw = Math.toDegrees(orientationAngles.get(0).toDouble()).toFloat()
-            val rawPitch = Math.toDegrees(orientationAngles.get(1).toDouble()).toFloat()
-
             if (!isCalibrated) {
-                initialYaw = rawYaw
-                initialPitch = rawPitch
-                panelYaw = 0f
-                panelPitch = 0f
+                recenterPanel()
                 isCalibrated = true
             }
-
-            headYaw = rawYaw - initialYaw
-            headPitch = rawPitch - initialPitch
         }
     }
 
@@ -373,21 +423,21 @@ fun VrStereoScreen(
     showCrosshair: Boolean,
     passthroughAlpha: Float,
     cameraFrame: Bitmap?,
-    headYaw: Float,
-    headPitch: Float,
-    panelYaw: Float,
-    panelPitch: Float,
-    hands: List<List<FloatArray>>
+    rotationMatrix: FloatArray,
+    panelPos: Triple<Float, Float, Float>,
+    hands: List<List<FloatArray>>,
+    clickCount: Int,
+    isButtonHovered: Boolean
 ) {
     Row(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-            EyeViewport(isLeftEye = true, ipdMm, pxPerMm, showCrosshair, passthroughAlpha, cameraFrame, headYaw, headPitch, panelYaw, panelPitch, hands)
+            EyeViewport(isLeftEye = true, ipdMm, pxPerMm, showCrosshair, passthroughAlpha, cameraFrame, rotationMatrix, panelPos, hands, clickCount, isButtonHovered)
         }
 
         Box(modifier = Modifier.width(2.dp).fillMaxHeight().background(Color(0xFF222222)))
 
         Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-            EyeViewport(isLeftEye = false, ipdMm, pxPerMm, showCrosshair, passthroughAlpha, cameraFrame, headYaw, headPitch, panelYaw, panelPitch, hands)
+            EyeViewport(isLeftEye = false, ipdMm, pxPerMm, showCrosshair, passthroughAlpha, cameraFrame, rotationMatrix, panelPos, hands, clickCount, isButtonHovered)
         }
     }
 }
@@ -400,16 +450,16 @@ fun EyeViewport(
     showCrosshair: Boolean,
     passthroughAlpha: Float,
     cameraFrame: Bitmap?,
-    headYaw: Float,
-    headPitch: Float,
-    panelYaw: Float,
-    panelPitch: Float,
-    hands: List<List<FloatArray>>
+    rotationMatrix: FloatArray,
+    panelPos: Triple<Float, Float, Float>,
+    hands: List<List<FloatArray>>,
+    clickCount: Int,
+    isButtonHovered: Boolean
 ) {
     val textPaint = remember {
         Paint().apply {
             color = android.graphics.Color.WHITE
-            textSize = 46f
+            textSize = 42f
             textAlign = Paint.Align.CENTER
             isAntiAlias = true
             isFakeBoldText = true
@@ -417,9 +467,19 @@ fun EyeViewport(
         }
     }
 
+    val buttonTextPaint = remember {
+        Paint().apply {
+            color = android.graphics.Color.WHITE
+            textSize = 30f
+            textAlign = Paint.Align.CENTER
+            isAntiAlias = true
+            isFakeBoldText = true
+        }
+    }
+
     val panelPaint = remember {
         Paint().apply {
-            color = android.graphics.Color.argb(230, 20, 20, 24)
+            color = android.graphics.Color.argb(235, 20, 20, 26)
             style = Paint.Style.FILL
             isAntiAlias = true
         }
@@ -430,6 +490,13 @@ fun EyeViewport(
             color = android.graphics.Color.WHITE
             style = Paint.Style.STROKE
             strokeWidth = 3f
+            isAntiAlias = true
+        }
+    }
+
+    val buttonPaint = remember {
+        Paint().apply {
+            style = Paint.Style.FILL
             isAntiAlias = true
         }
     }
@@ -450,44 +517,74 @@ fun EyeViewport(
             }
         }
 
-        // Физическое смещение IPD: сдвиг центров линз в пикселях
-        // Базовый IPD = 63 мм. Разница смещает картинку для идеального совмещения линз очков
+        // Физическое смещение IPD (до 100 мм)
         val eyeSign = if (isLeftEye) 1f else -1f
         val ipdShiftPixels = eyeSign * ((ipdMm - 63f) * 0.5f * pxPerMm)
 
         val centerX = eyeWidth / 2f + ipdShiftPixels
         val centerY = eyeHeight / 2f
 
-        // 2. Расчет положения плашки «Привет мир»
-        var dYaw = panelYaw - headYaw
-        while (dYaw > 180f) dYaw -= 360f
-        while (dYaw < -180f) dYaw += 360f
+        // 2. Векторная проекция плашки
+        // Forward, Up, Right в мировой системе
+        val fX = -rotationMatrix.get(2)
+        val fY = -rotationMatrix.get(6)
+        val fZ = -rotationMatrix.get(10)
 
-        val dPitch = panelPitch - headPitch
+        val uX = rotationMatrix.get(0)
+        val uY = rotationMatrix.get(4)
+        val uZ = rotationMatrix.get(8)
 
-        // Пикселей на 1 градус поворота
-        val pxPerDeg = eyeWidth / 70f
+        val rX = -rotationMatrix.get(1)
+        val rY = -rotationMatrix.get(5)
+        val rZ = -rotationMatrix.get(9)
 
-        // ИСПРАВЛЕНИЕ: верные знаки направлений
-        // При повороте головы влево (dYaw > 0) плашка смещается вправо
-        // При наклоне головы вверх плашка смещается вниз экрана
-        val screenX = centerX + dYaw * pxPerDeg
-        val screenY = centerY + dPitch * pxPerDeg
+        val dx = panelPos.first
+        val dy = panelPos.second
+        val dz = panelPos.third
 
-        // Рисуем плашку, если она в поле зрения
-        if (abs(dYaw) < 55f && abs(dPitch) < 45f) {
-            val w = 310f
-            val h = 120f
+        // Скалярные произведения с ортогональными осями
+        val localX = dx * rX + dy * rY + dz * rZ
+        val localY = dx * uX + dy * uY + dz * uZ
+        val localZ = dx * fX + dy * fY + dz * fZ
+
+        // Если плашка в поле зрения
+        if (localZ > 0.3f) {
+            val fov = 750f
+            val screenX = centerX + (localX / localZ) * fov
+            val screenY = centerY - (localY / localZ) * fov
+
+            val w = 340f
+            val h = 180f
             val rect = RectF(screenX - w / 2, screenY - h / 2, screenX + w / 2, screenY + h / 2)
 
             drawIntoCanvas { canvas ->
-                canvas.nativeCanvas.drawRoundRect(rect, 20f, 20f, panelPaint)
-                canvas.nativeCanvas.drawRoundRect(rect, 20f, 20f, borderPaint)
-                canvas.nativeCanvas.drawText("Привет мир", screenX, screenY + 14f, textPaint)
+                // Фон плашки
+                canvas.nativeCanvas.drawRoundRect(rect, 24f, 24f, panelPaint)
+                canvas.nativeCanvas.drawRoundRect(rect, 24f, 24f, borderPaint)
+
+                // Текст «Привет мир»
+                canvas.nativeCanvas.drawText("Привет мир", screenX, screenY - 24f, textPaint)
+
+                // Интерактивная кнопка на плашке
+                val btnW = 280f
+                val btnH = 64f
+                val btnRect = RectF(screenX - btnW / 2, screenY + 12f, screenX + btnW / 2, screenY + 12f + btnH)
+
+                // Подсветка кнопки при наведении курсора пальца
+                if (isButtonHovered) {
+                    buttonPaint.color = android.graphics.Color.argb(255, 41, 121, 255) // Ярко-синий Hover
+                } else {
+                    buttonPaint.color = android.graphics.Color.argb(180, 50, 50, 60)
+                }
+
+                canvas.nativeCanvas.drawRoundRect(btnRect, 16f, 16f, buttonPaint)
+
+                val btnLabel = if (clickCount == 0) "Нажми меня (Щелчок)" else "Нажато: $clickCount раз!"
+                canvas.nativeCanvas.drawText(btnLabel, screenX, screenY + 54f, buttonTextPaint)
             }
         }
 
-        // 3. Скелет рук чисто БЕЛОГО цвета
+        // 3. Белый скелет рук и курсор-кружок на кончике пальца
         val handConnections = listOf(
             0 to 1, 1 to 2, 2 to 3, 3 to 4,
             0 to 5, 5 to 6, 6 to 7, 7 to 8,
@@ -498,6 +595,7 @@ fun EyeViewport(
         )
 
         hands.forEach { points ->
+            // Линии костей
             handConnections.forEach { (a, b) ->
                 if (a < points.size && b < points.size) {
                     val p1 = points.get(a)
@@ -511,32 +609,51 @@ fun EyeViewport(
                 }
             }
 
-            points.forEachIndexed { _, pt ->
-                drawCircle(
-                    color = Color.White,
-                    radius = 7f,
-                    center = Offset(pt.get(0) * eyeWidth + ipdShiftPixels, pt.get(1) * eyeHeight)
-                )
+            // Суставы
+            points.forEachIndexed { idx, pt ->
+                val pX = pt.get(0) * eyeWidth + ipdShiftPixels
+                val pY = pt.get(1) * eyeHeight
+
+                if (idx == 8) {
+                    // КРУЖОК-КУРСОР на кончике указательного пальца (как в Vision Pro)
+                    drawCircle(
+                        color = if (isButtonHovered) Color(0xFF2979FF) else Color.White,
+                        radius = 16f,
+                        center = Offset(pX, pY),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 4f)
+                    )
+                    drawCircle(
+                        color = Color.White,
+                        radius = 5f,
+                        center = Offset(pX, pY)
+                    )
+                } else {
+                    drawCircle(
+                        color = Color.White,
+                        radius = 7f,
+                        center = Offset(pX, pY)
+                    )
+                }
             }
         }
 
-        // 4. Прицельные крестики калибровки IPD (показываются при настройке громкостью)
+        // 4. Прицельные крестики IPD
         if (showCrosshair) {
             drawLine(
                 color = Color(0xAA64B5F6),
-                start = Offset(centerX - 35f, centerY),
-                end = Offset(centerX + 35f, centerY),
+                start = Offset(centerX - 40f, centerY),
+                end = Offset(centerX + 40f, centerY),
                 strokeWidth = 3f
             )
             drawLine(
                 color = Color(0xAA64B5F6),
-                start = Offset(centerX, centerY - 35f),
-                end = Offset(centerX, centerY + 35f),
+                start = Offset(centerX, centerY - 40f),
+                end = Offset(centerX, centerY + 40f),
                 strokeWidth = 3f
             )
             drawCircle(
                 color = Color(0x6664B5F6),
-                radius = 25f,
+                radius = 30f,
                 center = Offset(centerX, centerY)
             )
         }
