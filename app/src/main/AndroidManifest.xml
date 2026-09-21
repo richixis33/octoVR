@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
@@ -32,10 +33,11 @@
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:theme="@style/Theme.OctoVR" />
 
-        <!-- ZXing Activity для сканирования QR -->
+        <!-- ZXing Activity для сканирования QR с переопределением ориентации -->
         <activity
             android:name="com.journeyapps.barcodescanner.CaptureActivity"
             android:screenOrientation="portrait"
+            tools:replace="android:screenOrientation"
             android:exported="false" />
 
     </application>
