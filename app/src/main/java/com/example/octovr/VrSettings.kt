@@ -9,6 +9,8 @@ object VrSettings {
     private const val KEY_IPD_MM = "pref_ipd_mm"
     private const val KEY_CONFIDENCE = "pref_confidence"
     private const val KEY_SMOOTHING = "pref_smoothing"
+    private const val KEY_PASSTHROUGH_ALPHA = "pref_passthrough_alpha"
+    private const val KEY_FRONT_CAMERA = "pref_front_camera"
 
     private fun p(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -21,4 +23,10 @@ object VrSettings {
 
     fun isSmoothing(context: Context): Boolean = p(context).getBoolean(KEY_SMOOTHING, true)
     fun setSmoothing(context: Context, value: Boolean) = p(context).edit().putBoolean(KEY_SMOOTHING, value).apply()
+
+    fun getPassthroughAlpha(context: Context): Float = p(context).getFloat(KEY_PASSTHROUGH_ALPHA, 0.85f)
+    fun setPassthroughAlpha(context: Context, value: Float) = p(context).edit().putFloat(KEY_PASSTHROUGH_ALPHA, value).apply()
+
+    fun isFrontCamera(context: Context): Boolean = p(context).getBoolean(KEY_FRONT_CAMERA, false)
+    fun setFrontCamera(context: Context, value: Boolean) = p(context).edit().putBoolean(KEY_FRONT_CAMERA, value).apply()
 }
