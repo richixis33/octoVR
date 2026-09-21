@@ -11,7 +11,6 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Bundle
 import android.os.SystemClock
-import android.view.Surface
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -28,6 +27,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
@@ -42,16 +42,13 @@ class VrActivity : ComponentActivity(), SensorEventListener {
     private lateinit var sensorManager: SensorManager
     private var rotationSensor: Sensor? = null
 
-    // 3DoF поворот головы (матрица вращения 4x4)
     private val rotationMatrix = FloatArray(16) { if (it % 5 == 0) 1f else 0f }
     private val remappedMatrix = FloatArray(16)
 
-    // Положение плашки в мировых координатах (по умолчанию 1.5м впереди)
     private var panelWorldX = 0f
     private var panelWorldY = 0f
     private var panelWorldZ = 1.5f
 
-    // Текущие суставы рук
     private var handLandmarks: List<List<FloatArray>> = emptyList()
 
     private var landmarker: HandLandmarker? = null
@@ -72,10 +69,7 @@ class VrActivity : ComponentActivity(), SensorEventListener {
                 ipdOffsetPx = VrSettings.getIpdMm(this) * 2.5f,
                 rotationMatrix = rotationMatrix,
                 panelPos = Triple(panelWorldX, panelWorldY, panelWorldZ),
-                hands = handLandmarks,
-                onPinch = {
-                    recenterPanelInFrontOfUser()
-                }
+                hands = handLandmarks
             )
         }
     }
@@ -88,10 +82,10 @@ class VrActivity : ComponentActivity(), SensorEventListener {
         val options = HandLandmarker.HandLandmarkerOptions.builder()
             .setBaseOptions(baseOptions)
             .setMinHandDetectionConfidence(VrSettings.getConfidence(this))
-            .setMinHandTrackingConfidence(VrSettings.getConfidence(this))
+            .setMinTrackingConfidence(VrSettings.getConfidence(this))
             .setNumHands(2)
             .setRunningMode(RunningMode.LIVE_STREAM)
-            .setResultListener { result: HandLandmarkerResult, _ ->
+            .setResultListener { result, _ ->
                 processHands(result)
             }
             .build()
@@ -135,7 +129,7 @@ class VrActivity : ComponentActivity(), SensorEventListener {
             val points = landmarkList.map { floatArrayOf(it.x(), it.y(), it.z()) }
             hands.add(points)
 
-            // Проверка жеста щипка: расстояние между кончиком большого (4) и указательного (8)
+            // Проверка щипка: кончик большого (4) и кончик указательного (8)
             if (points.size >= 9) {
                 val dx = points[4][0] - points[8][0]
                 val dy = points[4] - points[8]
@@ -149,9 +143,7 @@ class VrActivity : ComponentActivity(), SensorEventListener {
         handLandmarks = hands
     }
 
-    // Перемещает плашку ровно по центру взгляда на расстоянии 1.5м
     private fun recenterPanelInFrontOfUser() {
-        // Извлекаем вектор направления взгляда из матрицы вращения головы
         panelWorldX = -remappedMatrix[2] * 1.5f
         panelWorldY = -remappedMatrix[6] * 1.5f
         panelWorldZ = -remappedMatrix[10] * 1.5f
@@ -193,23 +185,19 @@ fun VrStereoScreen(
     ipdOffsetPx: Float,
     rotationMatrix: FloatArray,
     panelPos: Triple<Float, Float, Float>,
-    hands: List<List<FloatArray>>,
-    onPinch: () -> Unit
+    hands: List<List<FloatArray>>
 ) {
     Row(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // Левый глаз
         Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
             EyeViewport(isLeftEye = true, ipdOffsetPx, rotationMatrix, panelPos, hands)
         }
 
-        // Разделительная линия между глазами
         Box(modifier = Modifier.width(2.dp).fillMaxHeight().background(Color.DarkGray))
 
-        // Правый глаз
         Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
             EyeViewport(isLeftEye = false, ipdOffsetPx, rotationMatrix, panelPos, hands)
         }
@@ -255,17 +243,14 @@ fun EyeViewport(
         val centerX = size.width / 2f + (if (isLeftEye) ipdOffsetPx else -ipdOffsetPx)
         val centerY = size.height / 2f
 
-        // 1. Проекция 3D плашки «Привет мир» с учетом поворота головы
         val px = panelPos.first
         val py = panelPos.second
         val pz = panelPos.third
 
-        // Умножаем мировую точку на ориентацию камеры
         val viewX = rotationMatrix[0] * px + rotationMatrix[4] * py + rotationMatrix[8] * pz
         val viewY = rotationMatrix * px + rotationMatrix[5] * py + rotationMatrix[9] * pz
         val viewZ = rotationMatrix[2] * px + rotationMatrix[6] * py + rotationMatrix[10] * pz
 
-        // Если плашка перед нами
         if (viewZ > 0.3f) {
             val fov = 650f
             val screenX = centerX + (viewX / viewZ) * fov
@@ -284,7 +269,6 @@ fun EyeViewport(
             }
         }
 
-        // 2. Отрисовка скелета рук (суставы + кости)
         val handConnections = listOf(
             0 to 1, 1 to 2, 2 to 3, 3 to 4,
             0 to 5, 5 to 6, 6 to 7, 7 to 8,
@@ -295,7 +279,6 @@ fun EyeViewport(
         )
 
         hands.forEach { points ->
-            // Рисуем соединения (кости)
             handConnections.forEach { (a, b) ->
                 if (a < points.size && b < points.size) {
                     val p1 = points[a]
@@ -309,7 +292,6 @@ fun EyeViewport(
                 }
             }
 
-            // Рисуем ключевые суставы
             points.forEachIndexed { idx, pt ->
                 drawCircle(
                     color = if (idx in listOf(4, 8)) Color(0xFFFF5252) else Color.White,

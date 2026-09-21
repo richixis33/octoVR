@@ -130,7 +130,6 @@ fun HomeScreen(
             }
         }
 
-        // Большая кнопка Войти в VR
         Button(
             modifier = Modifier
                 .fillMaxWidth()
@@ -171,11 +170,9 @@ fun SettingsAndAboutScreen() {
     var confidence by remember { mutableFloatStateOf(VrSettings.getConfidence(context)) }
     var smoothing by remember { mutableStateOf(VrSettings.isSmoothing(context)) }
 
-    // Лаунчер для сканирования QR-кода
     val qrLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
         if (result.contents != null) {
             val text = result.contents
-            // Поиск чисел IPD (например ipd:64 или http...ipd=64)
             val regex = """(?:ipd[=:]\s*|ipd\s*)?([5-7][0-9](?:\.[0-9]+)?)""".toRegex(RegexOption.IGNORE_CASE)
             val match = regex.find(text)
             if (match != null) {
@@ -200,7 +197,6 @@ fun SettingsAndAboutScreen() {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Настройка IPD и QR
         ElevatedCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Калибровка IPD (Межзрачковое расстояние)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -234,7 +230,6 @@ fun SettingsAndAboutScreen() {
             }
         }
 
-        // Параметры MediaPipe
         ElevatedCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Настройки MediaPipe", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -267,7 +262,6 @@ fun SettingsAndAboutScreen() {
             }
         }
 
-        // О приложении
         OutlinedCard(modifier = Modifier.fillMaxWidth()) {
             Column {
                 ListItem(
